@@ -6,22 +6,22 @@
 <title>1863 Sports & Entertainment</title>
 <link rel='preconnect' href='https://fonts.googleapis.com'/>
 <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin/>
-<link href='https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap' rel='stylesheet'/>
+<link href='https://fonts.googleapis.com/css2?family=Barlow:wght@900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap' rel='stylesheet'/>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js'></script>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js'></script>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js'></script>
 <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js'></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:#0a0a0a;color:#e8e6e3;font-family:'Inter',sans-serif;min-height:100vh;}
+body{background:#040c14;color:#e8edf0;font-family:'Inter',sans-serif;min-height:100vh;}
 ::-webkit-scrollbar{width:6px;height:6px;}
-::-webkit-scrollbar-track{background:#111;}
-::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
-::-webkit-scrollbar-thumb:hover{background:#444;}
+::-webkit-scrollbar-track{background:#040c14;}
+::-webkit-scrollbar-thumb{background:#143044;border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:#1e3a52;}
 </style>
 </head>
 <body>
-<div id='root'><div style='display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0d12;'><p style='color:#4a6079;font-family:Inter,sans-serif;font-size:11px;'>Starting 1863 platform&hellip;</p></div></div>
+<div id='root'><div style='display:flex;align-items:center;justify-content:center;min-height:100vh;background:#040c14;'><p style='color:#4a6475;font-family:Inter,sans-serif;font-size:11px;'>Starting 1863 platform&hellip;</p></div></div>
 <script>
 const {
   useState,
@@ -30,27 +30,27 @@ const {
   useMemo
 } = React;
 
-// 1863 brand palette: Orange #f58c30 | Deep navy #054760 | Near-black #231f20 · Modern pro dark theme
+// 1863 brand palette: Orange #f58c30 | Deep navy #054760 | Design C dark theme
 const T = {
-  bg: "#0a0d12",
-  panel: "#111928",
-  border: "#1e2d42",
+  bg: "#040c14",
+  panel: "#0a1a24",
+  border: "#143044",
   gold: "#f58c30",
-  goldDim: "#1e1206",
-  text: "#e2e8f0",
-  muted: "#4a6079",
-  dim: "#0f1724",
-  green: "#34d399",
-  greenDim: "#042914",
-  greenBorder: "#065f46",
+  goldDim: "rgba(245,140,48,0.12)",
+  text: "#e8edf0",
+  muted: "#4a6475",
+  dim: "#0d2030",
+  green: "#4ade80",
+  greenDim: "#071a0f",
+  greenBorder: "#166534",
   amber: "#fbbf24",
   amberDim: "#1c1505",
   amberBorder: "#78350f",
   red: "#f87171",
   redDim: "#1a0707",
   redBorder: "#7f1d1d",
-  blue: "#60a5fa",
-  blueDim: "#0d1f3c"
+  blue: "#52aaec",
+  blueDim: "#051a30"
 };
 const POS_COLOR = {
   GK: "#7c3aed",
@@ -8732,92 +8732,91 @@ const SEED_CLUBS = [{
   dateAdded: "01/02/2026"
 }];
 
-// 1863 brand logo – SVG recreation of the EIGHTEEN 63 mark
-function Logo1863({
-  size = 40,
-  dark = false
-}) {
-  // Colours from brand guidelines
-  const c6 = dark ? "#231f20" : "#1a1512"; // black/near-black "6"
-  const c3 = dark ? "#6d6e71" : "#5a5450"; // grey "3"
-  const text = dark ? "#231f20" : "#d4cfc9";
-  const h = size;
-  const w = size * 0.8;
-  return /*#__PURE__*/React.createElement("svg", {
-    viewBox: "0 0 100 126",
-    width: w,
-    height: h,
+// Real vector mark – bezier paths extracted from official 1863 brand PDF
+function LogoMark({size=40, dark=false}) {
+  const id = "lgm-" + (dark ? "d" : "c");
+  const fill = dark ? "#6d6e71" : "url(#" + id + ")";
+  const w = Math.round(size * (109.402/113.466) * 100) / 100;
+  return React.createElement("svg", {
+    width: w, height: size,
+    viewBox: "0 0 109.402 113.466",
     xmlns: "http://www.w3.org/2000/svg",
-    style: {
-      flexShrink: 0
-    }
-  }, /*#__PURE__*/React.createElement("text", {
-    x: "50",
-    y: "16",
-    textAnchor: "middle",
-    fontFamily: "'DM Sans',Arial,sans-serif",
-    fontWeight: "700",
-    fontSize: "16",
-    letterSpacing: "1",
-    fill: text
-  }, "EIGHTEEN"), /*#__PURE__*/React.createElement("text", {
-    x: "28",
-    y: "90",
-    textAnchor: "middle",
-    fontFamily: "'DM Serif Display',Georgia,serif",
-    fontSize: "80",
-    fill: c6
-  }, "6"), /*#__PURE__*/React.createElement("text", {
-    x: "72",
-    y: "82",
-    textAnchor: "middle",
-    fontFamily: "'DM Serif Display',Georgia,serif",
-    fontSize: "72",
-    fill: c3
-  }, "3"), /*#__PURE__*/React.createElement("text", {
-    x: "50",
-    y: "118",
-    textAnchor: "middle",
-    fontFamily: "'DM Sans',Arial,sans-serif",
-    fontWeight: "300",
-    fontSize: "7.5",
-    letterSpacing: "1.5",
-    fill: dark ? "#6d6e71" : T.muted
-  }, "sports & entertainment"));
+    style: {flexShrink:0, display:"block"}
+  },
+    !dark && React.createElement("defs", null,
+      React.createElement("linearGradient", {
+        id: id, gradientUnits: "userSpaceOnUse",
+        x1: "0", y1: "0", x2: "109.402", y2: "113.466"
+      },
+        React.createElement("stop", {offset: "0%", stopColor: "#8BE4FA"}),
+        React.createElement("stop", {offset: "45%", stopColor: "#52AAEC"}),
+        React.createElement("stop", {offset: "100%", stopColor: "#1844B8"})
+      )
+    ),
+    React.createElement("path", {fill,
+      d: "M34.528 44.411C32.502 44.411 30.517 44.586 28.586 44.921L46.756 11.812L32.380 11.812L4.786 61.391C4.570 61.755 4.362 62.123 4.160 62.496C1.507 67.385 0.000 72.986 0.000 78.939C0.000 98.008 15.459 113.466 34.528 113.466C35.341 113.466 36.147 113.437 36.945 113.382L45.129 98.705C41.972 100.402 38.363 101.365 34.528 101.365C22.142 101.365 12.102 91.324 12.102 78.939C12.102 66.553 22.142 56.512 34.528 56.512C46.455 56.512 56.207 65.823 56.913 77.573L65.104 62.884C59.325 51.901 47.801 44.411 34.528 44.411"
+    }),
+    React.createElement("path", {fill,
+      d: "M104.845 49.398C101.816 43.907 97.681 39.408 92.552 36.023C89.890 34.283 86.870 32.826 83.577 31.692L82.505 31.323L96.819 0.000L55.559 0.000L49.886 11.758L77.129 11.758L69.451 29.226L68.015 32.416L62.897 43.966L64.332 43.526C66.778 42.776 69.252 42.395 71.684 42.395C75.088 42.395 78.376 43.063 81.457 44.380C84.531 45.699 87.231 47.504 89.480 49.746C91.735 51.996 93.545 54.686 94.860 57.743C96.180 60.813 96.850 64.091 96.850 67.486C96.850 70.990 96.179 74.296 94.858 77.314C93.540 80.323 91.728 82.961 89.472 85.154C87.217 87.344 84.521 89.118 81.457 90.426C78.378 91.741 75.089 92.408 71.684 92.408C66.745 92.408 62.126 91.072 57.952 88.436L57.934 88.424C55.625 86.885 53.593 84.992 51.895 82.798C50.191 80.603 48.881 78.150 48.002 75.511L47.992 75.478C47.790 74.805 47.644 74.081 47.560 73.326L47.492 72.717L34.265 72.717L34.400 73.516C35.279 78.715 37.135 83.531 39.915 87.828C43.046 92.670 47.079 96.649 51.905 99.656C57.951 103.386 64.606 105.278 71.684 105.278C76.919 105.278 81.885 104.290 86.445 102.343C91.012 100.394 95.044 97.689 98.429 94.304C101.811 90.922 104.516 86.890 106.467 82.321C108.414 77.759 109.402 72.793 109.402 67.560C109.402 60.996 107.869 54.885 104.845 49.398"
+    })
+  );
+}
+
+// 1863 brand logo – real vector mark with Barlow typography
+function Logo1863({size=40, dark=false}) {
+  return React.createElement("div", {
+    style: {display:"flex", flexDirection:"column", alignItems:"flex-start", lineHeight:1}
+  },
+    React.createElement("div", {
+      style: {
+        fontFamily:"'Barlow',sans-serif", fontWeight:900,
+        fontSize: Math.round(size * 0.32) + "px",
+        letterSpacing:"0.22em", textTransform:"uppercase",
+        color: dark ? "#6d6e71" : T.text,
+        marginBottom: Math.round(size * 0.07) + "px", lineHeight:1
+      }
+    }, "EIGHTEEN"),
+    React.createElement(LogoMark, {size, dark}),
+    React.createElement("div", {
+      style: {
+        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:300,
+        fontSize: Math.round(size * 0.11) + "px",
+        letterSpacing:"0.28em", textTransform:"uppercase",
+        color: dark ? "#6d6e71" : T.muted,
+        marginTop: Math.round(size * 0.08) + "px", lineHeight:1
+      }
+    }, "sports & entertainment")
+  );
 }
 
 // Sidebar compact wordmark
 function Logo1863Compact() {
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "flex-end",
-      gap: "0px",
-      lineHeight: 1
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontFamily: "'DM Serif Display',serif",
-      fontSize: "28px",
-      color: T.gold,
-      lineHeight: 1,
-      letterSpacing: "-0.01em"
-    }
-  }, "1863"));
+  return React.createElement("div", {
+    style: {display:"flex", alignItems:"center", gap:"8px", lineHeight:1}
+  },
+    React.createElement(LogoMark, {size:28}),
+    React.createElement("span", {
+      style: {
+        fontFamily:"'Barlow',sans-serif", fontWeight:900,
+        fontSize:"12px", letterSpacing:"0.18em",
+        color: T.text, textTransform:"uppercase"
+      }
+    }, "1863")
+  );
 }
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Serif+Display&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;}
-  ::placeholder{color:#2a3f5a;}
+  ::placeholder{color:#2a3f52;}
   input,select,textarea{font-family:'DM Sans',sans-serif;}
   @keyframes slideUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
   ::-webkit-scrollbar{width:4px;height:4px;}
-  ::-webkit-scrollbar-track{background:transparent;}
-  ::-webkit-scrollbar-thumb{background:#1e2d42;border-radius:4px;}
-  ::-webkit-scrollbar-thumb:hover{background:#2a3f5a;}
-  body{font-family:'Inter',sans-serif;}
+  ::-webkit-scrollbar-track{background:#040c14;}
+  ::-webkit-scrollbar-thumb{background:#143044;border-radius:4px;}
+  ::-webkit-scrollbar-thumb:hover{background:#1e3a52;}
+  body{background:#040c14;font-family:'Inter',sans-serif;}
 `;
 
 // UI primitives
@@ -17929,7 +17928,7 @@ Format:
       lines.push('');
     });
     lines.push('─────────────────────────────────────');
-    lines.push('Report generated by 1863 Scout Platform.');
+    lines.push('Report generated by 1863 Intelligence Platform.');
     lines.push('STRICTLY PRIVATE & CONFIDENTIAL');
     setEmailText(lines.join('\n'));
   };
@@ -18362,7 +18361,7 @@ function LoginScreen({
       letterSpacing: "0.22em",
       textTransform: "uppercase"
     }
-  }, "Scout Intelligence Platform"), /*#__PURE__*/React.createElement("div", {
+  }, "Intelligence Platform"), /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.panel,
       border: `1px solid ${T.border}`,
@@ -19379,7 +19378,7 @@ function App() {
       letterSpacing: "0.18em",
       lineHeight: 1.4
     }
-  }, "SCOUT", /*#__PURE__*/React.createElement("br", null), "PLATFORM"))), /*#__PURE__*/React.createElement("div", {
+  }, "INTELLIGENCE", /*#__PURE__*/React.createElement("br", null), "PLATFORM"))), /*#__PURE__*/React.createElement("div", {
     style: {
       height: "1px",
       background: T.border,
