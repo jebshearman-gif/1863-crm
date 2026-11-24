@@ -88,6 +88,18 @@ function uid() {
 function today() {
   return new Date().toLocaleDateString("en-GB");
 }
+function calcAge(dob) {
+  if (!dob || dob === "—") return null;
+  const parts = dob.split("/");
+  if (parts.length !== 3) return null;
+  const bd = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  if (isNaN(bd.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - bd.getFullYear();
+  const m = now.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < bd.getDate())) age--;
+  return age;
+}
 // Claude API key — stored in localStorage only, never in source code
 function getClaudeKey() {
   try {
@@ -9232,6 +9244,27 @@ function Dashboard({
     }
   });
   const topNats = Object.entries(natCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  // Upcoming birthdays — next 14 days
+  const thisYear = now.getFullYear();
+  const birthdays = players.filter(p => {
+    if (!p.dob || p.dob === "—") return false;
+    const parts = p.dob.split("/");
+    if (parts.length !== 3) return false;
+    let bd = new Date(thisYear, parseInt(parts[1]) - 1, parseInt(parts[0]));
+    if (bd < now) bd = new Date(thisYear + 1, parseInt(parts[1]) - 1, parseInt(parts[0]));
+    const diff = (bd - now) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 14;
+  }).sort((a, b) => {
+    const nextBd = p => {
+      const ps = p.dob.split("/");
+      let bd = new Date(thisYear, parseInt(ps[1]) - 1, parseInt(ps[0]));
+      if (bd < now) bd = new Date(thisYear + 1, parseInt(ps[1]) - 1, parseInt(ps[0]));
+      return bd;
+    };
+    return nextBd(a) - nextBd(b);
+  });
+
   return /*#__PURE__*/React.createElement("div", {
     style: {
       animation: "fadeIn 0.3s ease"
@@ -9453,7 +9486,7 @@ function Dashboard({
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
+      gridTemplateColumns: "1fr 1fr 1fr 1fr",
       gap: "2px",
       marginBottom: "2px"
     }
@@ -9595,7 +9628,34 @@ function Dashboard({
     }, count));
   }), players.length === 0 && /*#__PURE__*/React.createElement(Mono, {
     size: "11px"
-  }, "No players yet")))));
+  }, "No players yet"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SL, null, "Upcoming Birthdays"), birthdays.length === 0 && /*#__PURE__*/React.createElement(Mono, {
+    size: "11px",
+    color: T.muted
+  }, "No birthdays in next 14 days"), birthdays.map(p => {
+    const ps = p.dob.split("/");
+    let bd = new Date(thisYear, parseInt(ps[1]) - 1, parseInt(ps[0]));
+    if (bd < now) bd = new Date(thisYear + 1, parseInt(ps[1]) - 1, parseInt(ps[0]));
+    const daysUntil = Math.ceil((bd - now) / (1000 * 60 * 60 * 24));
+    const age = calcAge(p.dob);
+    const isToday = daysUntil === 0;
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      onClick: () => onNav("player", p),
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "7px 0",
+        borderBottom: `1px solid ${T.dim}`,
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {fontSize: "12px", color: isToday ? T.gold : T.text, fontWeight: isToday ? 600 : 500}
+    }, isToday ? "🎂 " : "", p.name), /*#__PURE__*/React.createElement(Mono, {size: "10px"}, p.currentClub || "—")), /*#__PURE__*/React.createElement("div", {style: {textAlign: "right"}}, /*#__PURE__*/React.createElement(Mono, {
+      size: "10px",
+      color: isToday ? T.gold : T.text
+    }, isToday ? "Today!" : daysUntil + "d"), age !== null && /*#__PURE__*/React.createElement(Mono, {size: "9px", color: T.muted}, "turns ", age + 1)));
+  }))));
 }
 
 // Club Recommender
@@ -10690,13 +10750,72 @@ function PlayersList({
   players,
   onNav,
   onDelete,
-  onArchive
+  onArchive,
+  onUpdate
 }) {
   const [q, setQ] = useState("");
   const [pos, setPos] = useState("All");
   const [verd, setVerd] = useState("All");
   const [stat, setStat] = useState("All");
   const [showExport, setShowExport] = useState(false);
+  const [showMass, setShowMass] = useState(false);
+  const [massBusy, setMassBusy] = useState(false);
+  const [massLog, setMassLog] = useState([]);
+  const [massProgress, setMassProgress] = useState({done: 0, total: 0, current: ""});
+
+  async function doMassUpdate() {
+    if (!getClaudeKey()) { alert("Claude API key required — configure in AI Settings."); return; }
+    const toUpdate = players.filter(p => !p.archived && p.status !== "Passed");
+    setMassBusy(true);
+    setMassLog([]);
+    setMassProgress({done: 0, total: toUpdate.length, current: ""});
+    for (let i = 0; i < toUpdate.length; i++) {
+      const p = toUpdate[i];
+      setMassProgress({done: i, total: toUpdate.length, current: p.name});
+      try {
+        const sysp = `You are a football data researcher. Search the web for the latest information on the given player. Return ONLY valid JSON: {"currentClub":"string or null","contractExpiry":"DD/MM/YYYY or null","changed":true}. Use null when unknown.`;
+        const usrp = `Find current club and contract expiry for: ${p.name} (${p.position || "??"}, ${p.nationality || "??"}, last known club: ${p.currentClub || "unknown"}). Return JSON only.`;
+        const msgs = [{role:"user",content:usrp}];
+        let result = null;
+        for (let turn = 0; turn < 6; turn++) {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method:"POST", headers:claudeHeaders(),
+            body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:sysp,
+              tools:[{type:"web_search_20250305",name:"web_search"}],messages:msgs})
+          });
+          const d = await res.json();
+          if (d.error) throw new Error(d.error.message);
+          msgs.push({role:"assistant",content:d.content});
+          if (d.stop_reason === "end_turn") {
+            const tb = (d.content||[]).filter(b=>b.type==="text");
+            if (tb.length) {
+              const raw = tb[tb.length-1].text.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
+              try { result = JSON.parse(raw); } catch { const m=raw.match(/\{[\s\S]*\}/); if(m) result=JSON.parse(m[0]); }
+            }
+            break;
+          }
+          if (d.stop_reason === "tool_use") {
+            msgs.push({role:"user",content:(d.content||[]).filter(b=>b.type==="tool_use").map(tu=>({type:"tool_result",tool_use_id:tu.id,content:"Search completed."}))});
+          }
+        }
+        if (result && onUpdate) {
+          const changes = [];
+          const updated = {...p};
+          if (result.currentClub && result.currentClub !== p.currentClub) { updated.currentClub = result.currentClub; changes.push(`club → ${result.currentClub}`); }
+          if (result.contractExpiry && result.contractExpiry !== p.contractExpiry && result.contractExpiry !== "null") { updated.contractExpiry = result.contractExpiry; changes.push(`contract → ${result.contractExpiry}`); }
+          if (changes.length) { await onUpdate(updated); }
+          setMassLog(prev => [...prev, {name:p.name, status: changes.length?"updated":"unchanged", changes}]);
+        } else {
+          setMassLog(prev => [...prev, {name:p.name, status:"unchanged", changes:[]}]);
+        }
+      } catch(err) {
+        setMassLog(prev => [...prev, {name:p.name, status:"error", msg:err.message}]);
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    setMassBusy(false);
+    setMassProgress(prev => ({...prev, done: toUpdate.length, current: ""}));
+  }
   const active = players.filter(p => !p.archived);
   const filtered = useMemo(() => active.filter(p => {
     if (q && ![p.name, p.currentClub, p.nationality].some(v => v?.toLowerCase().includes(q.toLowerCase()))) return false;
@@ -10712,7 +10831,32 @@ function PlayersList({
   }, showExport && /*#__PURE__*/React.createElement(ExportModal, {
     players: players,
     onClose: () => setShowExport(false)
-  }), /*#__PURE__*/React.createElement("div", {
+  }), showMass && /*#__PURE__*/React.createElement("div", {
+    style: {position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {background:T.panel,border:`1px solid ${T.border}`,borderRadius:"6px",padding:"28px",width:"520px",maxWidth:"95vw",maxHeight:"80vh",display:"flex",flexDirection:"column",gap:"16px"}
+  }, /*#__PURE__*/React.createElement(SL, null, "Mass AI Update"), /*#__PURE__*/React.createElement("p", {
+    style: {fontSize:"12px",color:T.muted,margin:0,lineHeight:1.5}
+  }, "Searches the web via Claude to verify current club and contract expiry for all active players. Each player uses one API call."), massBusy && /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(Mono, {size:"10px",color:T.text}, "Checking: ", massProgress.current, " (", massProgress.done, "/", massProgress.total, ")"),
+    /*#__PURE__*/React.createElement("div", {style:{height:"4px",background:T.dim,borderRadius:"2px",marginTop:"6px"}},
+      /*#__PURE__*/React.createElement("div", {style:{width:`${massProgress.total?massProgress.done/massProgress.total*100:0}%`,height:"100%",background:T.gold,borderRadius:"2px",transition:"width 0.3s"}})
+    )
+  ), massLog.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {flex:1,overflowY:"auto",maxHeight:"300px",display:"flex",flexDirection:"column",gap:"4px"}
+  }, massLog.map((l,i) => /*#__PURE__*/React.createElement("div", {
+    key:i, style:{display:"flex",gap:"8px",alignItems:"flex-start",padding:"5px 0",borderBottom:`1px solid ${T.dim}`}
+  }, /*#__PURE__*/React.createElement(Mono, {size:"9px",style:{minWidth:"16px"},color:l.status==="updated"?T.green:l.status==="error"?T.red:T.muted},
+    l.status==="updated"?"✓":l.status==="error"?"✗":"–"
+  ), /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(Mono, {size:"10px",color:T.text}, l.name),
+    l.changes?.length>0 && /*#__PURE__*/React.createElement(Mono, {size:"9px",color:T.muted}, l.changes.join(", ")),
+    l.msg && /*#__PURE__*/React.createElement(Mono, {size:"9px",color:T.red}, l.msg)
+  )))), /*#__PURE__*/React.createElement("div", {style:{display:"flex",gap:"8px",justifyContent:"flex-end"}},
+    /*#__PURE__*/React.createElement(Btn, {onClick:()=>{if(!massBusy)setShowMass(false);}, variant:"ghost", small:true}, massBusy?"Running…":"Close"),
+    !massBusy && massLog.length === 0 && /*#__PURE__*/React.createElement(Btn, {onClick:doMassUpdate, small:true}, "▶ Run Update"),
+    !massBusy && massLog.length > 0 && /*#__PURE__*/React.createElement(Btn, {onClick:doMassUpdate, variant:"outline", small:true}, "↺ Run Again")
+  ))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -10750,6 +10894,10 @@ function PlayersList({
     variant: "outline",
     small: true
   }, "⬇ Export"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => { setShowMass(true); setMassLog([]); },
+    variant: "outline",
+    small: true
+  }, "⚡ Mass Update"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => onNav("scout"),
     variant: "outline",
     small: true
@@ -11423,11 +11571,14 @@ function PlayerDetail({
       gap: "14px",
       flexWrap: "wrap"
     }
-  }, [player.currentClub, player.nationality, player.dob].filter(Boolean).map((v, i) => /*#__PURE__*/React.createElement(Mono, {
+  }, [player.currentClub, player.nationality].filter(Boolean).map((v, i) => /*#__PURE__*/React.createElement(Mono, {
     key: i,
     size: "11px",
     color: T.text
-  }, v)))), player.recommendation?.verdict && player.status !== "Signed" && /*#__PURE__*/React.createElement("div", {
+  }, v)), player.dob && player.dob !== "—" && /*#__PURE__*/React.createElement(Mono, {
+    size: "11px",
+    color: T.text
+  }, player.dob, calcAge(player.dob) !== null ? ` (${calcAge(player.dob)})` : ""))), player.recommendation?.verdict && player.status !== "Signed" && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center"
     }
@@ -11628,7 +11779,30 @@ function PlayerDetail({
       margin: 0,
       lineHeight: 1.5
     }
-  }, cr.rationale))))))), player.notes && /*#__PURE__*/React.createElement("div", {
+  }, cr.rationale))))))), (player.technical?.score || player.tactical?.score || player.physical?.score || player.mental?.score) && /*#__PURE__*/React.createElement("div", {
+    style: {background: T.panel, border: `1px solid ${T.dim}`, padding: "16px 22px", marginBottom: "2px"}
+  }, /*#__PURE__*/React.createElement(SL, null, "Scout Scoring"), /*#__PURE__*/React.createElement("div", {
+    style: {display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px"}
+  }, ["technical", "tactical", "physical", "mental"].map(cat => {
+    const s = player[cat];
+    if (!s) return null;
+    const score = parseInt(s.score) || 0;
+    const pct = score * 10;
+    const col = score >= 8 ? T.green : score >= 6 ? T.gold : score >= 4 ? T.amber : T.red;
+    return /*#__PURE__*/React.createElement("div", {key: cat, style: {background: T.bg, border: `1px solid ${T.border}`, borderRadius: "3px", padding: "10px 12px"}},
+      /*#__PURE__*/React.createElement(Mono, {size: "9px", color: T.muted, style: {marginBottom: "6px"}}, cat.toUpperCase()),
+      /*#__PURE__*/React.createElement("div", {style: {fontSize: "22px", fontWeight: 700, color: col, fontFamily: "'Inter',sans-serif", lineHeight: 1}}, score, /*#__PURE__*/React.createElement("span", {style: {fontSize: "11px", color: T.muted, fontWeight: 400}}, "/10")),
+      /*#__PURE__*/React.createElement("div", {style: {height: "3px", background: T.dim, borderRadius: "2px", marginTop: "6px"}},
+        /*#__PURE__*/React.createElement("div", {style: {width: `${pct}%`, height: "100%", background: col, borderRadius: "2px"}})
+      ),
+      s.notes && /*#__PURE__*/React.createElement("p", {style: {fontSize: "11px", color: T.muted, margin: "6px 0 0", lineHeight: 1.4}}, s.notes)
+    );
+  }))), (player.source || player.addedBy || player.dateAdded) && /*#__PURE__*/React.createElement("div", {
+    style: {background: T.panel, border: `1px solid ${T.dim}`, padding: "12px 22px", marginBottom: "2px", display: "flex", gap: "24px", flexWrap: "wrap"}
+  }, player.source && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Mono, {size: "9px", color: T.muted}, "SOURCE"), /*#__PURE__*/React.createElement("div", {style: {fontSize: "12px", color: T.text, marginTop: "2px"}}, player.source)),
+    player.addedBy && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Mono, {size: "9px", color: T.muted}, "ADDED BY"), /*#__PURE__*/React.createElement("div", {style: {fontSize: "12px", color: T.text, marginTop: "2px"}}, player.addedBy)),
+    player.dateAdded && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Mono, {size: "9px", color: T.muted}, "DATE ADDED"), /*#__PURE__*/React.createElement("div", {style: {fontSize: "12px", color: T.text, marginTop: "2px"}}, player.dateAdded))
+  ), player.notes && /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.panel,
       border: `1px solid ${T.dim}`,
@@ -18950,6 +19124,235 @@ function AISettingsView() {
     color: T.muted
   }, "Your API key is stored only in this browser's local storage. It is never sent to any server other than Anthropic's API, and is never included in any code or repository. To get a key, visit console.anthropic.com → API Keys."))));
 }
+// ── All UEFA member top-flight league IDs (API-Football) ──────────────────
+const UEFA_LEAGUES = [
+  // Big 5
+  {id:39,  name:"Premier League",    country:"England",        tier:1},
+  {id:140, name:"La Liga",           country:"Spain",          tier:1},
+  {id:78,  name:"Bundesliga",        country:"Germany",        tier:1},
+  {id:135, name:"Serie A",           country:"Italy",          tier:1},
+  {id:61,  name:"Ligue 1",           country:"France",         tier:1},
+  // Top next-tier
+  {id:94,  name:"Primeira Liga",     country:"Portugal",       tier:2},
+  {id:88,  name:"Eredivisie",        country:"Netherlands",    tier:2},
+  {id:144, name:"Pro League",        country:"Belgium",        tier:2},
+  {id:203, name:"Süper Lig",         country:"Türkiye",        tier:2},
+  {id:179, name:"Premiership",       country:"Scotland",       tier:2},
+  {id:197, name:"Super League",      country:"Greece",         tier:2},
+  // Other UEFA members
+  {id:119, name:"Superligaen",       country:"Denmark",        tier:3},
+  {id:113, name:"Allsvenskan",       country:"Sweden",         tier:3},
+  {id:103, name:"Eliteserien",       country:"Norway",         tier:3},
+  {id:207, name:"Super League",      country:"Switzerland",    tier:3},
+  {id:218, name:"Bundesliga",        country:"Austria",        tier:3},
+  {id:106, name:"Ekstraklasa",       country:"Poland",         tier:3},
+  {id:235, name:"Premier League",    country:"Russia",         tier:3},
+  {id:333, name:"Premier League",    country:"Ukraine",        tier:3},
+  {id:283, name:"Liga 1",            country:"Romania",        tier:3},
+  {id:210, name:"HNL",               country:"Croatia",        tier:3},
+  {id:286, name:"SuperLiga",         country:"Serbia",         tier:3},
+  {id:271, name:"OTP Bank Liga",     country:"Hungary",        tier:3},
+  {id:345, name:"Fortuna Liga",      country:"Czech Republic", tier:3},
+  {id:332, name:"Fortuna liga",      country:"Slovakia",       tier:3},
+  {id:172, name:"First PFL",         country:"Bulgaria",       tier:3},
+  {id:308, name:"Prva Liga",         country:"Slovenia",       tier:3},
+  {id:116, name:"Premier League",    country:"Belarus",        tier:3},
+  {id:271, name:"NB I",              country:"Hungary",        tier:3},
+  {id:382, name:"Super Liga",        country:"Moldova",        tier:4},
+  {id:362, name:"First League",      country:"Montenegro",     tier:4},
+  {id:206, name:"Primera Divisió",   country:"Andorra",        tier:4},
+  {id:378, name:"National League",   country:"Gibraltar",      tier:4},
+  {id:302, name:"Super League",      country:"Kosovo",         tier:4},
+  {id:260, name:"A Lyga",            country:"Lithuania",      tier:4},
+  {id:361, name:"Virsliga",          country:"Latvia",         tier:4},
+  {id:324, name:"Meistriliiga",      country:"Estonia",        tier:4},
+  {id:184, name:"Veikkausliiga",     country:"Finland",        tier:4},
+  {id:164, name:"Úrvalsdeild",       country:"Iceland",        tier:4},
+  {id:369, name:"Faroese Premier League", country:"Faroe Islands", tier:4},
+  {id:218, name:"Bundesliga",        country:"Liechtenstein",  tier:4},
+  {id:395, name:"Erovnuli Liga",     country:"Georgia",        tier:4},
+  {id:149, name:"Premier League",    country:"Armenia",        tier:4},
+  {id:131, name:"Premier League",    country:"Azerbaijan",     tier:4},
+  {id:371, name:"Ligat Ha'Al",       country:"Israel",         tier:3},
+  {id:357, name:"First Division",    country:"Cyprus",         tier:3},
+  {id:373, name:"BGL Ligue",         country:"Luxembourg",     tier:4},
+  {id:355, name:"Premier League",    country:"Malta",          tier:4},
+  {id:300, name:"Liga 1",            country:"North Macedonia",tier:4},
+  {id:384, name:"Premier League of Bosnia", country:"Bosnia & Herzegovina", tier:4},
+  {id:160, name:"Kategoria Superiore", country:"Albania",      tier:4},
+  {id:188, name:"League of Ireland Premier", country:"Ireland", tier:4},
+  {id:356, name:"NIFL Premiership",  country:"Northern Ireland",tier:4},
+  {id:321, name:"Cymru Premier",     country:"Wales",          tier:4},
+  {id:296, name:"Super Liga",        country:"Kazakhstan",     tier:3},
+  {id:390, name:"Campionato Sammarinese", country:"San Marino",tier:4},
+];
+
+function LeaguesView() {
+  const [search, setSearch] = React.useState("");
+  const [tierFilter, setTierFilter] = React.useState("All");
+  const [selectedLeague, setSelectedLeague] = React.useState(null);
+  const [standings, setStandings] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const afFetchLeague = async leagueId => {
+    const k = getApiFootballKey();
+    if (!k) throw new Error("API-Football key required — configure in AI Settings (⚙)");
+    const season = new Date().getFullYear();
+    const cacheKey = `1863_std_${leagueId}_${season}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const {data, ts} = JSON.parse(cached);
+        if (Date.now() - ts < 86400000) return data;
+      }
+    } catch {}
+    const tryFetch = async url => {
+      const r = await fetch(url, {headers:{"x-apisports-key":k}});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (j.errors && Object.keys(j.errors||{}).length) throw new Error(Object.values(j.errors)[0]);
+      return j;
+    };
+    const url = `https://v3.football.api-sports.io/standings?league=${leagueId}&season=${season}`;
+    let j;
+    try { j = await tryFetch(url); }
+    catch { j = await tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`); }
+    if (!j.response?.length) {
+      const url2 = `https://v3.football.api-sports.io/standings?league=${leagueId}&season=${season-1}`;
+      try { j = await tryFetch(url2); }
+      catch { j = await tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(url2)}`); }
+    }
+    try { localStorage.setItem(cacheKey, JSON.stringify({data:j,ts:Date.now()})); } catch {}
+    return j;
+  };
+
+  const selectLeague = async lg => {
+    setSelectedLeague(lg);
+    setStandings(null);
+    setError(null);
+    setLoading(true);
+    try {
+      const j = await afFetchLeague(lg.id);
+      const groups = j.response?.[0]?.league?.standings || [];
+      setStandings(groups);
+    } catch(e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const filtered = UEFA_LEAGUES.filter(lg => {
+    if (search && !lg.name.toLowerCase().includes(search.toLowerCase()) && !lg.country.toLowerCase().includes(search.toLowerCase())) return false;
+    if (tierFilter !== "All") {
+      const labels = {"Big 5":1,"Established":2,"Other UEFA":3,"Smaller":4};
+      if (lg.tier !== labels[tierFilter]) return false;
+    }
+    return true;
+  });
+
+  const tierLabel = t => t===1?"Big 5":t===2?"Established":t===3?"Other UEFA":"Smaller";
+  const tierColor = t => t===1?T.gold:t===2?T.blue:t===3?T.text:T.muted;
+
+  return /*#__PURE__*/React.createElement("div", {style:{animation:"fadeIn 0.3s ease"}},
+    /*#__PURE__*/React.createElement("div", {style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"22px"}},
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", {style:{fontFamily:"'DM Serif Display',serif",fontSize:"22px",color:T.text,marginBottom:"3px"}}, "League Standings"),
+        /*#__PURE__*/React.createElement(Mono, {size:"11px"}, UEFA_LEAGUES.length, " UEFA top-flight leagues · 24hr cache")
+      )
+    ),
+    /*#__PURE__*/React.createElement("div", {style:{display:"grid",gridTemplateColumns:"280px 1fr",gap:"16px",alignItems:"start"}},
+      // Left: league list
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", {style:{display:"flex",gap:"6px",marginBottom:"8px",flexWrap:"wrap"}},
+          /*#__PURE__*/React.createElement("input", {
+            value:search, onChange:e=>setSearch(e.target.value),
+            placeholder:"Search league or country…",
+            style:{flex:1,minWidth:"130px",background:T.panel,border:`1px solid ${T.border}`,borderRadius:"3px",padding:"6px 10px",color:T.text,fontSize:"11px",outline:"none"}
+          }),
+          /*#__PURE__*/React.createElement("select", {
+            value:tierFilter, onChange:e=>setTierFilter(e.target.value),
+            style:{background:T.panel,border:`1px solid ${T.border}`,borderRadius:"3px",padding:"6px 8px",color:T.text,fontSize:"10px",fontFamily:"'Inter',sans-serif",outline:"none"}
+          }, ["All","Big 5","Established","Other UEFA","Smaller"].map(o=>/*#__PURE__*/React.createElement("option",{key:o,value:o},o)))
+        ),
+        /*#__PURE__*/React.createElement("div", {style:{display:"flex",flexDirection:"column",gap:"2px",maxHeight:"72vh",overflowY:"auto"}},
+          filtered.map(lg=>/*#__PURE__*/React.createElement("button", {
+            key:`${lg.id}-${lg.country}`,
+            onClick:()=>selectLeague(lg),
+            style:{
+              background: selectedLeague?.id===lg.id&&selectedLeague?.country===lg.country ? T.goldDim : "none",
+              border: selectedLeague?.id===lg.id&&selectedLeague?.country===lg.country ? `1px solid ${T.gold}` : `1px solid transparent`,
+              borderRadius:"3px", padding:"7px 10px", cursor:"pointer",
+              textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center"
+            }
+          },
+            /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("div", {style:{fontSize:"12px",color:T.text,fontWeight:500}}, lg.name),
+              /*#__PURE__*/React.createElement(Mono, {size:"9px"}, lg.country)
+            ),
+            /*#__PURE__*/React.createElement(Mono, {size:"9px",color:tierColor(lg.tier)}, tierLabel(lg.tier))
+          ))
+        )
+      ),
+      // Right: standings table
+      /*#__PURE__*/React.createElement("div", null,
+        !selectedLeague && /*#__PURE__*/React.createElement("div", {style:{padding:"40px",textAlign:"center"}},
+          /*#__PURE__*/React.createElement(Mono, {size:"11px",color:T.muted}, "← Select a league to view standings")
+        ),
+        selectedLeague && loading && /*#__PURE__*/React.createElement("div", {style:{padding:"40px",textAlign:"center"}},
+          /*#__PURE__*/React.createElement(Mono, {size:"11px"}, "Loading ", selectedLeague.name, "…")
+        ),
+        selectedLeague && error && /*#__PURE__*/React.createElement("div", {style:{padding:"20px",background:T.redDim,border:`1px solid ${T.redBorder}`,borderRadius:"4px"}},
+          /*#__PURE__*/React.createElement(Mono, {size:"11px",color:T.red}, error)
+        ),
+        selectedLeague && !loading && standings && /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("div", {style:{marginBottom:"12px"}},
+            /*#__PURE__*/React.createElement("div", {style:{fontFamily:"'DM Serif Display',serif",fontSize:"18px",color:T.text,marginBottom:"2px"}}, selectedLeague.name),
+            /*#__PURE__*/React.createElement(Mono, {size:"10px",color:T.muted}, selectedLeague.country, " · Top flight")
+          ),
+          standings.length === 0 && /*#__PURE__*/React.createElement(Mono, {size:"11px",color:T.muted}, "No standings data available for current season"),
+          standings.map((group, gi) => /*#__PURE__*/React.createElement("div", {key:gi, style:{marginBottom:"16px"}},
+            standings.length > 1 && /*#__PURE__*/React.createElement(Mono, {size:"9px",color:T.muted,style:{marginBottom:"6px"}}, group[0]?.group||`Group ${gi+1}`),
+            /*#__PURE__*/React.createElement(Card, {style:{padding:0,overflow:"hidden"}},
+              /*#__PURE__*/React.createElement("div", {style:{overflowX:"auto"}},
+                /*#__PURE__*/React.createElement("table", {style:{width:"100%",borderCollapse:"collapse",minWidth:"500px"}},
+                  /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {style:{borderBottom:`1px solid ${T.border}`}},
+                    [["#","32px"],["Team",""],["P","44px"],["W","44px"],["D","44px"],["L","44px"],["GD","48px"],["Pts","52px"]].map(([h,w])=>
+                      /*#__PURE__*/React.createElement("th", {key:h,style:{padding:"8px 10px",textAlign:h==="Team"?"left":"center",width:w||undefined,fontFamily:"'Inter',sans-serif",fontSize:"9px",color:T.muted,fontWeight:600,letterSpacing:"0.1em"}},h)
+                    )
+                  )),
+                  /*#__PURE__*/React.createElement("tbody", null, group.map((row,ri)=>{
+                    const pts=row.points, gd=(row.goalsDiff>=0?"+":"")+row.goalsDiff;
+                    const qual = row.description;
+                    const rowBg = ri%2===0 ? "transparent" : `rgba(255,255,255,0.01)`;
+                    const descColor = qual?.toLowerCase().includes("champion")||qual?.toLowerCase().includes("promotion") ? T.green
+                      : qual?.toLowerCase().includes("relegation") ? T.red
+                      : qual?.toLowerCase().includes("europa")||qual?.toLowerCase().includes("conference") ? T.blue
+                      : "transparent";
+                    return /*#__PURE__*/React.createElement("tr", {key:ri,style:{background:rowBg,borderLeft:descColor!=="transparent"?`3px solid ${descColor}`:"3px solid transparent"}},
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px",color:T.muted},row.rank)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px"}},
+                        /*#__PURE__*/React.createElement("div", {style:{display:"flex",alignItems:"center",gap:"8px"}},
+                          row.team?.logo && /*#__PURE__*/React.createElement("img",{src:row.team.logo,style:{width:"16px",height:"16px",objectFit:"contain"},loading:"lazy"}),
+                          /*#__PURE__*/React.createElement("span",{style:{fontSize:"12px",color:T.text,fontWeight:500}},row.team?.name)
+                        )
+                      ),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px"},row.all?.played)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px",color:T.green},row.all?.win)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px",color:T.muted},row.all?.draw)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px",color:T.red},row.all?.lose)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement(Mono,{size:"10px",color:row.goalsDiff>=0?T.text:T.muted},gd)),
+                      /*#__PURE__*/React.createElement("td", {style:{padding:"8px 10px",textAlign:"center"}}, /*#__PURE__*/React.createElement("span",{style:{fontSize:"13px",fontWeight:700,color:T.gold,fontFamily:"'Inter',sans-serif"}},pts))
+                    );
+                  }))
+                )
+              )
+            )
+          ))
+        )
+      )
+    )
+  );
+}
+
 const NAV = [{
   id: "dashboard",
   icon: "◈",
@@ -18994,6 +19397,10 @@ const NAV = [{
   id: "gbe",
   icon: "✔",
   label: "GBE Check"
+}, {
+  id: "leagues",
+  icon: "▦",
+  label: "Leagues"
 }, {
   id: "ai-settings",
   icon: "⚙",
@@ -19467,7 +19874,8 @@ function App() {
     players: players,
     onNav: nav,
     onDelete: deletePlayer,
-    onArchive: archivePlayer
+    onArchive: archivePlayer,
+    onUpdate: updatePlayer
   }), view === "portfolio" && /*#__PURE__*/React.createElement(PortfolioView, {
     players: players,
     proposals: proposals,
@@ -19540,7 +19948,7 @@ function App() {
     onNav: nav
   }), view === "training-comp" && /*#__PURE__*/React.createElement(TrainingCompView, null), view === "gbe" && /*#__PURE__*/React.createElement(GBECalcView, {
     players: players
-  }), view === "ai-settings" && /*#__PURE__*/React.createElement(AISettingsView, null)));
+  }), view === "leagues" && /*#__PURE__*/React.createElement(LeaguesView, null), view === "ai-settings" && /*#__PURE__*/React.createElement(AISettingsView, null)));
 }
 console.log('[1863] Starting — React:', typeof React, 'ReactDOM:', typeof ReactDOM, 'Supabase:', typeof window.supabase);
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary, null, React.createElement(App, null)));
