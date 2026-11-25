@@ -11375,6 +11375,456 @@ function DocumentsSection({
     }
   }, "×"))));
 }
+
+// ============================================================
+// PERFORMANCE TAB COMPONENT
+// ============================================================
+function PerformanceTab({player}) {
+  const SK = `1863_af_link_${player.id}`;
+  const [link, setLink] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(SK) || 'null'); } catch(e) { return null; }
+  });
+  const [q, setQ] = useState(player.name || '');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [afStats, setAfStats] = useState(null);
+  const [career, setCareer] = useState([]);
+  const [elo, setElo] = useState(null);
+  const [report, setReport] = useState(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (link && link.afPlayerId) loadStats(link.afPlayerId);
+    if (player.currentClub) loadElo(player.currentClub);
+  }, []);
+
+  const RC = (pos) => {
+    const p = (pos || '').toUpperCase();
+    if (['CF','ST','SS'].includes(p)) return [
+      {l:'Goals/90',k:'g90',lo:0,hi:0.9},{l:'Shot Acc%',k:'sa',lo:15,hi:70},
+      {l:'Dribbles/90',k:'dr90',lo:0,hi:5},{l:'Aerial%',k:'aer',lo:20,hi:75},
+      {l:'Key Pass/90',k:'kp90',lo:0,hi:2.5},{l:'Assists/90',k:'a90',lo:0,hi:0.5}
+    ];
+    if (['LW','RW'].includes(p)) return [
+      {l:'G+A/90',k:'ga90',lo:0,hi:1.0},{l:'Dribble%',k:'drp',lo:20,hi:80},
+      {l:'Key Pass/90',k:'kp90',lo:0,hi:2.5},{l:'Dribbles/90',k:'dr90',lo:0,hi:6},
+      {l:'Shot Acc%',k:'sa',lo:15,hi:70},{l:'Aerial%',k:'aer',lo:15,hi:60}
+    ];
+    if (['CAM','AM','LM','RM'].includes(p)) return [
+      {l:'Key Pass/90',k:'kp90',lo:0,hi:3.0},{l:'G+A/90',k:'ga90',lo:0,hi:1.0},
+      {l:'Dribble%',k:'drp',lo:20,hi:80},{l:'Pass Acc%',k:'pa',lo:60,hi:92},
+      {l:'Dribbles/90',k:'dr90',lo:0,hi:4},{l:'Duel%',k:'dup',lo:30,hi:70}
+    ];
+    if (['CDM','CM'].includes(p)) return [
+      {l:'Pass Acc%',k:'pa',lo:60,hi:92},{l:'Key Pass/90',k:'kp90',lo:0,hi:2.0},
+      {l:'Def Actions/90',k:'def90',lo:0,hi:7},{l:'Duel%',k:'dup',lo:30,hi:70},
+      {l:'Dribble%',k:'drp',lo:20,hi:75},{l:'G+A/90',k:'ga90',lo:0,hi:0.5}
+    ];
+    if (['CB'].includes(p)) return [
+      {l:'Aerial%',k:'aer',lo:30,hi:80},{l:'Def Actions/90',k:'def90',lo:0,hi:8},
+      {l:'Pass Acc%',k:'pa',lo:60,hi:92},{l:'Duel%',k:'dup',lo:30,hi:75},
+      {l:'Interceptions/90',k:'int90',lo:0,hi:4},{l:'Fouls/90',k:'f90',lo:4,hi:0}
+    ];
+    if (['LB','RB','LWB','RWB'].includes(p)) return [
+      {l:'Key Pass/90',k:'kp90',lo:0,hi:4},{l:'Def Actions/90',k:'def90',lo:0,hi:7},
+      {l:'Dribble%',k:'drp',lo:20,hi:75},{l:'Aerial%',k:'aer',lo:20,hi:65},
+      {l:'G+A/90',k:'ga90',lo:0,hi:0.5},{l:'Pass Acc%',k:'pa',lo:60,hi:90}
+    ];
+    if (['GK'].includes(p)) return [
+      {l:'Save%',k:'svp',lo:50,hi:85},{l:'Aerial%',k:'aer',lo:30,hi:80},
+      {l:'Pass Acc%',k:'pa',lo:40,hi:85},{l:'Duel%',k:'dup',lo:30,hi:70},
+      {l:'Def Actions/90',k:'def90',lo:0,hi:5},{l:'Fouls/90',k:'f90',lo:1,hi:0}
+    ];
+    return [
+      {l:'Pass Acc%',k:'pa',lo:60,hi:92},{l:'Key Pass/90',k:'kp90',lo:0,hi:2},
+      {l:'Def Actions/90',k:'def90',lo:0,hi:6},{l:'Duel%',k:'dup',lo:30,hi:70},
+      {l:'Dribble%',k:'drp',lo:20,hi:75},{l:'G+A/90',k:'ga90',lo:0,hi:0.5}
+    ];
+  };
+
+  const getMetrics = (s) => {
+    if (!s) return {};
+    const m = s.games && s.games.minutes ? s.games.minutes : 1;
+    const p90 = (v) => (v || 0) / (m / 90);
+    const goals = s.goals || {};
+    const shots = s.shots || {};
+    const passes = s.passes || {};
+    const dribbles = s.dribbles || {};
+    const duels = s.duels || {};
+    const tackles = s.tackles || {};
+    const fouls = s.fouls || {};
+    return {
+      g90: p90(goals.total), a90: p90(goals.assists),
+      ga90: p90((goals.total || 0) + (goals.assists || 0)),
+      sa: shots.total > 0 ? (shots.on / shots.total) * 100 : 0,
+      pa: passes.accuracy || 0, kp90: p90(passes.key),
+      dr90: p90(dribbles.attempts),
+      drp: dribbles.attempts > 0 ? (dribbles.success / dribbles.attempts) * 100 : 0,
+      aer: duels.total > 0 ? (duels.won / duels.total) * 100 : 0,
+      dup: duels.total > 0 ? (duels.won / duels.total) * 100 : 0,
+      def90: p90((tackles.total || 0) + (tackles.interceptions || 0)),
+      int90: p90(tackles.interceptions), f90: p90(fouls.committed),
+      svp: 0
+    };
+  };
+
+  const toPct = (v, lo, hi) => {
+    if (lo > hi) return Math.round(Math.max(0, Math.min(100, (1 - (v - hi) / (lo - hi)) * 100)));
+    return Math.round(Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100)));
+  };
+  const pctCol = (p) => p >= 70 ? '#F58C30' : p >= 55 ? '#18b8a0' : p >= 40 ? '#e6a817' : '#e05252';
+  const pctZone = (p) => p >= 70 ? 'TOP 30%' : p >= 55 ? 'ABOVE AVG' : p >= 40 ? 'AVERAGE' : 'BELOW AVG';
+
+  const loadStats = async (id) => {
+    const k = getApiFootballKey();
+    if (!k) return;
+    setLoadingStats(true); setErr(null);
+    try {
+      const r = await fetch(`https://v3.football.api-sports.io/players?id=${id}&season=2024`, {headers: {'x-apisports-key': k}});
+      const d = await r.json();
+      const resp = d.response && d.response[0];
+      if (resp) {
+        setAfStats({player: resp.player, st: resp.statistics && resp.statistics[0]});
+        const seasons = ['2020','2021','2022','2023','2024'];
+        const rows = [];
+        for (const s of seasons) {
+          try {
+            const cr = await fetch(`https://v3.football.api-sports.io/players?id=${id}&season=${s}`, {headers: {'x-apisports-key': k}});
+            const cd = await cr.json();
+            const cr2 = cd.response && cd.response[0];
+            if (cr2 && cr2.statistics) cr2.statistics.forEach(st => {
+              if ((st.games && st.games.appearences || 0) > 0) rows.push({
+                season: s + '/' + String(parseInt(s) + 1).slice(-2),
+                league: (st.league && st.league.name) || '—',
+                country: (st.league && st.league.country) || '',
+                club: (st.team && st.team.name) || '—',
+                apps: (st.games && st.games.appearences) || 0,
+                goals: (st.goals && st.goals.total) || 0,
+                assists: (st.goals && st.goals.assists) || 0,
+                rating: parseFloat((st.games && st.games.rating) || '0').toFixed(1),
+                mins: (st.games && st.games.minutes) || 0
+              });
+            });
+          } catch(e2) {}
+        }
+        rows.sort((a, b) => a.season.localeCompare(b.season));
+        setCareer(rows);
+      } else {
+        setErr('Player not found for 2024 season. Try a different season or relink.');
+      }
+    } catch(e) { setErr('Stats load failed: ' + e.message); }
+    setLoadingStats(false);
+  };
+
+  const loadElo = async (club) => {
+    const name = club.replace(/\b(fc|sc|rc|rfc|afc|fk|sk|bv|sv|vfb|vfl|sg|cd|ud|ac|as|ss|cf|us)\b/gi, '').replace(/[^a-zA-Z0-9]/g, '');
+    if (!name) return;
+    try {
+      const r = await fetch(`https://api.clubelo.com/${name}`);
+      const txt = await r.text();
+      const lines = txt.trim().split('\n');
+      if (lines.length > 1) {
+        const last = lines[lines.length - 1].split(',');
+        if (last.length >= 5 && !isNaN(parseFloat(last[4]))) {
+          setElo({elo: Math.round(parseFloat(last[4])), level: last[3], country: last[2]});
+        }
+      }
+    } catch(e) {}
+  };
+
+  const searchPlayer = async () => {
+    const k = getApiFootballKey();
+    if (!k) { setErr('API-Football key not set. Go to AI Settings to add it.'); return; }
+    setSearching(true); setErr(null);
+    try {
+      const r = await fetch(`https://v3.football.api-sports.io/players?search=${encodeURIComponent(q)}&season=2024`, {headers: {'x-apisports-key': k}});
+      const d = await r.json();
+      setResults(d.response || []);
+      if (!(d.response && d.response.length)) setErr('No players found. Try a shorter name.');
+    } catch(e) { setErr('Search failed: ' + e.message); }
+    setSearching(false);
+  };
+
+  const doLink = (p) => {
+    const ld = {afPlayerId: p.player.id, afName: p.player.name, linkedAt: new Date().toISOString()};
+    try { localStorage.setItem(SK, JSON.stringify(ld)); } catch(e) {}
+    setLink(ld); setResults([]); loadStats(p.player.id);
+  };
+
+  const doUnlink = () => {
+    try { localStorage.removeItem(SK); } catch(e) {}
+    setLink(null); setAfStats(null); setCareer([]); setReport(null);
+  };
+
+  const genReport = async () => {
+    const k = getClaudeKey();
+    if (!k) return;
+    setLoadingReport(true);
+    const s = afStats && afStats.st;
+    const rc = RC(player.position);
+    const mx = getMetrics(s);
+    const metLine = rc.map(c => `${c.l}: ${toPct(mx[c.k] || 0, c.lo, c.hi)}th pct`).join(', ');
+    const age = calcAge(player.dob);
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: claudeHeaders(),
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+          messages: [{role: 'user', content: `You are an elite football agent and scout. Write a performance report for ${player.name} (${player.position}${age ? ', age ' + age : ''}, ${player.currentClub || ''}).\nSeason stats: ${(s && s.games && s.games.appearences) || '?'} apps, ${(s && s.goals && s.goals.total) || 0} goals, ${(s && s.goals && s.goals.assists) || 0} assists, rating ${(s && s.games && s.games.rating) || '?'}, ${(s && s.games && s.games.minutes) || 0} mins.\nMetrics vs peers: ${metLine}\n\nReturn ONLY valid JSON with these exact keys: {"strengths":"2-3 standout qualities citing specific stats","development":"1-2 areas to improve with specific stats","pitch":"One compelling paragraph selling this player to a potential club, referencing the data trajectory and potential"}`}]
+        })
+      });
+      const d = await r.json();
+      const txt = (d.content && d.content[0] && d.content[0].text) || '';
+      const match = txt.match(/\{[\s\S]+\}/);
+      if (match) { const json = JSON.parse(match[0]); setReport(json); }
+    } catch(e) { setErr('Report generation failed. Check your Claude key.'); }
+    setLoadingReport(false);
+  };
+
+  const renderRadar = (rc, mx) => {
+    const N = rc.length, CX = 160, CY = 130, R = 92, LR = 118;
+    const pt = (i, pct) => {
+      const a = -Math.PI / 2 + i * (2 * Math.PI / N), r = (pct / 100) * R;
+      return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+    };
+    const poly = (pct) => rc.map((_, i) => pt(i, pct).join(',')).join(' ');
+    const pcts = rc.map(c => toPct(mx[c.k] || 0, c.lo, c.hi));
+    const playerPoly = pcts.map((p, i) => pt(i, p).join(',')).join(' ');
+    return React.createElement('svg', {viewBox: '0 0 320 260', style: {width: '100%', maxWidth: '320px', display: 'block', margin: '0 auto'}},
+      [20, 40, 60, 80, 100].map(rp => React.createElement('polygon', {key: 'r' + rp, points: poly(rp), fill: 'none', stroke: rp === 100 ? '#1a3a4a' : '#0f2535', strokeWidth: rp === 100 ? '1' : '0.5'})),
+      rc.map((_, i) => { const [x2, y2] = pt(i, 100); return React.createElement('line', {key: 'ax' + i, x1: CX, y1: CY, x2, y2, stroke: '#0f2535', strokeWidth: '0.5'}); }),
+      React.createElement('polygon', {points: poly(50), fill: 'none', stroke: '#18b8a0', strokeWidth: '1', strokeDasharray: '3 3', opacity: '0.5'}),
+      React.createElement('polygon', {points: playerPoly, fill: 'rgba(245,140,48,0.12)', stroke: '#F58C30', strokeWidth: '1.5'}),
+      pcts.map((p, i) => { const [cx, cy] = pt(i, p); return React.createElement('circle', {key: 'd' + i, cx, cy, r: '3', fill: pctCol(p), stroke: '#040c14', strokeWidth: '1'}); }),
+      rc.map((c, i) => {
+        const [lx, ly] = pt(i, LR / R * 100);
+        const p = pcts[i];
+        const anc = lx < CX - 10 ? 'end' : lx > CX + 10 ? 'start' : 'middle';
+        return React.createElement('g', {key: 'lb' + i},
+          React.createElement('text', {x: lx, y: ly - 8, textAnchor: anc, fontSize: '7', fill: '#4a6475', fontFamily: "'Inter',sans-serif"}, c.l),
+          React.createElement('text', {x: lx, y: ly + 2, textAnchor: anc, fontSize: '9', fontWeight: '600', fill: pctCol(p), fontFamily: "'Inter',sans-serif"}, p + 'th')
+        );
+      })
+    );
+  };
+
+  const STile = (label, val, accent) => React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '14px 10px', textAlign: 'center'}},
+    React.createElement('div', {style: {fontFamily: "'Barlow Condensed',sans-serif", fontSize: '28px', fontWeight: 900, letterSpacing: '0.03em', color: accent ? T.gold : T.text, lineHeight: 1}}, val),
+    React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '8px', letterSpacing: '0.12em', color: T.muted, marginTop: '4px', textTransform: 'uppercase'}}, label)
+  );
+
+  const rc = RC(player.position);
+  const mx = getMetrics(afStats && afStats.st);
+  const pcts = rc.map(c => toPct(mx[c.k] || 0, c.lo, c.hi));
+  const st = afStats && afStats.st;
+  const hasAfKey = !!getApiFootballKey();
+
+  return React.createElement('div', {style: {marginTop: '2px'}},
+    elo && React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '10px 16px', marginBottom: '2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}},
+      React.createElement('div', null,
+        React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '8px', letterSpacing: '0.12em', color: T.muted, marginBottom: '4px'}}, 'CLUB ELO · ' + (player.currentClub || '')),
+        React.createElement('div', {style: {display: 'flex', alignItems: 'baseline', gap: '8px'}},
+          React.createElement('span', {style: {fontFamily: "'Barlow Condensed',sans-serif", fontSize: '24px', fontWeight: 900, color: T.gold}}, elo.elo),
+          React.createElement('span', {style: {fontFamily: "'Inter',sans-serif", fontSize: '10px', color: T.muted}}, elo.country + ' · Level ' + elo.level)
+        )
+      ),
+      React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', color: T.muted, textAlign: 'right', lineHeight: 1.5}},
+        React.createElement('div', null, 'clubelo.com'),
+        React.createElement('div', {style: {color: T.dim}}, 'live rating')
+      )
+    ),
+    !hasAfKey && React.createElement('div', {style: {background: T.amberDim, border: `1px solid ${T.amberBorder}`, borderRadius: '3px', padding: '14px 18px', marginBottom: '2px'}},
+      React.createElement('div', {style: {fontSize: '11px', color: T.amber, fontFamily: "'Inter',sans-serif", fontWeight: 600, marginBottom: '4px'}}, 'API-Football Key Required'),
+      React.createElement('div', {style: {fontSize: '11px', color: T.muted, lineHeight: 1.5, fontFamily: "'Inter',sans-serif"}}, 'Add your API-Football key in AI Settings to load player statistics, career history and generate scout reports.')
+    ),
+    hasAfKey && !link && React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '16px 18px', marginBottom: '2px'}},
+      React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted, marginBottom: '12px'}}, 'LINK API-FOOTBALL DATA'),
+      React.createElement('div', {style: {display: 'flex', gap: '8px', marginBottom: err ? '8px' : '0'}},
+        React.createElement('input', {
+          value: q, onChange: e => setQ(e.target.value),
+          onKeyDown: e => e.key === 'Enter' && searchPlayer(),
+          placeholder: 'Search player name…',
+          style: {flex: 1, background: T.bg, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '8px 12px', color: T.text, fontSize: '12px', fontFamily: "'Inter',sans-serif", outline: 'none'}
+        }),
+        React.createElement('button', {
+          onClick: searchPlayer, disabled: searching || !q,
+          style: {padding: '8px 16px', background: T.gold, border: 'none', borderRadius: '3px', color: '#040c14', fontSize: '10px', fontFamily: "'Inter',sans-serif", fontWeight: 700, letterSpacing: '0.1em', cursor: 'pointer', opacity: searching || !q ? 0.5 : 1}
+        }, searching ? '…' : 'SEARCH')
+      ),
+      err && React.createElement('div', {style: {fontSize: '11px', color: T.amber, marginTop: '8px', fontFamily: "'Inter',sans-serif"}}, err),
+      results.length > 0 && React.createElement('div', {style: {marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '260px', overflowY: 'auto'}},
+        React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', color: T.muted, letterSpacing: '0.1em', marginBottom: '6px'}}, results.length + ' RESULT' + (results.length !== 1 ? 'S' : '') + ' — click to link'),
+        results.slice(0, 10).map((p, i) => React.createElement('div', {
+          key: i, onClick: () => doLink(p),
+          style: {display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', background: T.bg, border: `1px solid ${T.dim}`, borderRadius: '3px', cursor: 'pointer'}
+        },
+          React.createElement('div', {style: {flex: 1}},
+            React.createElement('div', {style: {fontSize: '12px', color: T.text, fontFamily: "'Inter',sans-serif", fontWeight: 500}}, p.player.name),
+            React.createElement('div', {style: {fontSize: '10px', color: T.muted, marginTop: '2px', fontFamily: "'Inter',sans-serif"}},
+              (p.statistics && p.statistics[0] && p.statistics[0].team && p.statistics[0].team.name) || '—',
+              ' · ',
+              (p.statistics && p.statistics[0] && p.statistics[0].league && p.statistics[0].league.country) || '—',
+              ' · age ', p.player.age
+            )
+          ),
+          React.createElement('div', {style: {fontSize: '9px', color: T.muted, fontFamily: "'Space Mono',monospace"}}, '#' + p.player.id)
+        ))
+      )
+    ),
+    link && React.createElement('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', marginBottom: '2px'}},
+      React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', color: T.muted}},
+        'LINKED: ',
+        React.createElement('span', {style: {color: T.green}}, (link.afName || '') + ' · ID ' + link.afPlayerId)
+      ),
+      React.createElement('button', {
+        onClick: doUnlink,
+        style: {background: 'none', border: `1px solid ${T.border}`, borderRadius: '3px', padding: '3px 10px', color: T.muted, fontSize: '9px', cursor: 'pointer', fontFamily: "'Inter',sans-serif"}
+      }, 'Unlink')
+    ),
+    loadingStats && React.createElement('div', {style: {padding: '28px', textAlign: 'center', color: T.muted, fontFamily: "'Inter',sans-serif", fontSize: '11px', letterSpacing: '0.1em'}},
+      'Loading stats for ' + (link && link.afName || player.name) + '…'
+    ),
+    err && link && !loadingStats && React.createElement('div', {style: {background: T.redDim, border: `1px solid ${T.redBorder}`, borderRadius: '3px', padding: '12px 16px', marginBottom: '2px', fontSize: '11px', color: T.red, fontFamily: "'Inter',sans-serif"}}, err),
+    link && afStats && !loadingStats && React.createElement('div', null,
+      React.createElement('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '2px', marginBottom: '2px'}},
+        STile('Appearances', (st && st.games && st.games.appearences) || '—'),
+        STile('Goals', (st && st.goals && st.goals.total) || '0', true),
+        STile('Assists', (st && st.goals && st.goals.assists) || '0'),
+        STile('Avg Rating', st && st.games && st.games.rating ? parseFloat(st.games.rating).toFixed(1) : '—'),
+        STile('Mins/Goal', (st && st.goals && st.goals.total > 0 && st.games && st.games.minutes) ? Math.round(st.games.minutes / st.goals.total) : '—')
+      ),
+      React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', color: T.muted, marginBottom: '10px', paddingLeft: '1px'}},
+        'Data via API-Football · 2024/25 · ',
+        (st && st.league && st.league.name) || '',
+        st && st.league && st.league.name ? ' · ' : '',
+        (st && st.team && st.team.name) || ''
+      ),
+      React.createElement('div', {style: {display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', marginBottom: '2px'}},
+        React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '16px'}},
+          React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted, marginBottom: '12px'}}, 'PERFORMANCE RADAR · ' + (player.position || 'ALL')),
+          renderRadar(rc, mx),
+          React.createElement('div', {style: {display: 'flex', gap: '14px', justifyContent: 'center', marginTop: '10px'}},
+            React.createElement('div', {style: {display: 'flex', alignItems: 'center', gap: '5px'}},
+              React.createElement('div', {style: {width: '14px', height: '2px', background: '#F58C30'}}),
+              React.createElement('span', {style: {fontSize: '9px', color: T.muted, fontFamily: "'Inter',sans-serif"}}, 'Player')
+            ),
+            React.createElement('div', {style: {display: 'flex', alignItems: 'center', gap: '5px'}},
+              React.createElement('div', {style: {width: '14px', height: '0', borderTop: '1px dashed #18b8a0', opacity: 0.7}}),
+              React.createElement('span', {style: {fontSize: '9px', color: T.muted, fontFamily: "'Inter',sans-serif"}}, 'League avg (50th pct)')
+            )
+          )
+        ),
+        React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '16px'}},
+          React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted, marginBottom: '14px'}}, 'PERCENTILE RANKINGS'),
+          rc.map((c, i) => {
+            const p = pcts[i], col = pctCol(p);
+            return React.createElement('div', {key: i, style: {marginBottom: '11px'}},
+              React.createElement('div', {style: {display: 'flex', justifyContent: 'space-between', marginBottom: '4px'}},
+                React.createElement('span', {style: {fontFamily: "'Inter',sans-serif", fontSize: '10px', color: T.text}}, c.l),
+                React.createElement('span', {style: {fontFamily: "'Barlow Condensed',sans-serif", fontSize: '14px', fontWeight: 700, color: col}}, p + 'th')
+              ),
+              React.createElement('div', {style: {height: '4px', background: T.dim, borderRadius: '2px', overflow: 'hidden'}},
+                React.createElement('div', {style: {height: '100%', width: p + '%', background: col, borderRadius: '2px', transition: 'width 0.5s ease'}})
+              ),
+              React.createElement('div', {style: {fontSize: '8px', color: col, fontFamily: "'Inter',sans-serif", letterSpacing: '0.08em', marginTop: '2px'}}, pctZone(p))
+            );
+          })
+        )
+      ),
+      career.length > 0 && React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '16px', marginBottom: '2px'}},
+        React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted, marginBottom: '14px'}}, 'CAREER HISTORY'),
+        React.createElement('div', {style: {overflowX: 'auto'}},
+          React.createElement('table', {style: {width: '100%', borderCollapse: 'collapse', minWidth: '480px'}},
+            React.createElement('thead', null,
+              React.createElement('tr', null,
+                ['Season', 'Club', 'League', 'Apps', 'G', 'A', 'Rating'].map(h =>
+                  React.createElement('th', {key: h, style: {fontFamily: "'Inter',sans-serif", fontSize: '8px', letterSpacing: '0.1em', color: T.muted, textAlign: h === 'Apps' || h === 'G' || h === 'A' || h === 'Rating' ? 'center' : 'left', paddingBottom: '8px', paddingRight: '10px', borderBottom: `1px solid ${T.border}`, fontWeight: 400, textTransform: 'uppercase'}}, h)
+                )
+              )
+            ),
+            React.createElement('tbody', null,
+              career.map((row, i) => {
+                const isCurrent = i === career.length - 1;
+                const rating = parseFloat(row.rating);
+                return React.createElement('tr', {key: i, style: {borderBottom: `1px solid ${T.dim}`, background: isCurrent ? 'rgba(245,140,48,0.04)' : 'none'}},
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontFamily: "'Space Mono',monospace", fontSize: '10px', color: isCurrent ? T.gold : T.muted, whiteSpace: 'nowrap'}}, row.season),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '11px', color: T.text, fontFamily: "'Inter',sans-serif"}},
+                    React.createElement('span', null, row.club),
+                    isCurrent && React.createElement('span', {style: {marginLeft: '5px', fontSize: '8px', background: T.goldDim, color: T.gold, padding: '1px 5px', borderRadius: '2px', fontFamily: "'Inter',sans-serif", letterSpacing: '0.08em'}}, 'NOW')
+                  ),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '10px', color: T.muted, fontFamily: "'Inter',sans-serif", maxWidth: '130px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}, row.league),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '11px', color: T.text, textAlign: 'center', fontFamily: "'Space Mono',monospace"}}, row.apps),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '12px', color: isCurrent ? T.gold : T.text, fontWeight: isCurrent ? 700 : 400, textAlign: 'center', fontFamily: "'Barlow Condensed',sans-serif"}}, row.goals),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '11px', color: T.text, textAlign: 'center', fontFamily: "'Space Mono',monospace"}}, row.assists),
+                  React.createElement('td', {style: {padding: '8px 10px 8px 0', fontSize: '11px', textAlign: 'center', fontFamily: "'Space Mono',monospace", color: row.rating === '0.0' ? T.dim : rating >= 7.5 ? T.green : rating >= 7.0 ? T.amber : T.muted}}, row.rating === '0.0' ? '—' : row.rating)
+                );
+              })
+            )
+          )
+        )
+      ),
+      React.createElement('div', {style: {position: 'relative', marginBottom: '2px', borderRadius: '3px', overflow: 'hidden'}},
+        React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, padding: '16px', filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none'}},
+          React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted, marginBottom: '12px'}}, 'xG / ADVANCED METRICS'),
+          React.createElement('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px'}},
+            [['xG', '—'], ['npxG/90', '—'], ['xA', '—'], ['xG vs Goals', '—']].map(([l, v]) =>
+              React.createElement('div', {key: l, style: {textAlign: 'center', padding: '12px 8px'}},
+                React.createElement('div', {style: {fontFamily: "'Barlow Condensed',sans-serif", fontSize: '26px', fontWeight: 900, color: T.text}}, v),
+                React.createElement('div', {style: {fontSize: '9px', color: T.muted, marginTop: '3px', fontFamily: "'Inter',sans-serif"}}, l)
+              )
+            )
+          )
+        ),
+        React.createElement('div', {style: {position: 'absolute', inset: '0', background: 'rgba(4,12,20,0.75)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px'}},
+          React.createElement('div', {style: {fontSize: '20px'}}, '🔒'),
+          React.createElement('div', {style: {fontFamily: "'Barlow Condensed',sans-serif", fontSize: '14px', fontWeight: 700, letterSpacing: '0.15em', color: T.text}}, 'COMING SOON'),
+          React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '10px', color: T.muted, textAlign: 'center', maxWidth: '240px', lineHeight: 1.6}},
+            'xG, npxG, xA and advanced models available once Wyscout or FootyStats integration is active'
+          )
+        )
+      ),
+      React.createElement('div', {style: {background: T.panel, border: `1px solid ${T.border}`, borderRadius: '3px', padding: '16px', marginBottom: '2px'}},
+        React.createElement('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px'}},
+          React.createElement('div', {style: {fontFamily: "'Inter',sans-serif", fontSize: '9px', letterSpacing: '0.12em', color: T.muted}}, 'AI SCOUT REPORT'),
+          !report && React.createElement('button', {
+            onClick: genReport, disabled: loadingReport || !getClaudeKey(),
+            style: {padding: '5px 14px', background: getClaudeKey() && !loadingReport ? T.gold : T.dim, border: 'none', borderRadius: '3px', color: getClaudeKey() && !loadingReport ? '#040c14' : T.muted, fontSize: '9px', fontFamily: "'Inter',sans-serif", fontWeight: 700, letterSpacing: '0.1em', cursor: getClaudeKey() && !loadingReport ? 'pointer' : 'not-allowed'}
+          }, loadingReport ? 'Generating…' : 'Generate Report'),
+          report && React.createElement('button', {
+            onClick: () => setReport(null),
+            style: {background: 'none', border: `1px solid ${T.border}`, borderRadius: '3px', padding: '4px 10px', color: T.muted, fontSize: '9px', cursor: 'pointer', fontFamily: "'Inter',sans-serif"}
+          }, 'Regenerate')
+        ),
+        !getClaudeKey() && !report && React.createElement('div', {style: {fontSize: '10px', color: T.muted, fontFamily: "'Inter',sans-serif", lineHeight: 1.5}},
+          'Claude API key required. Add it in AI Settings to generate scouting reports.'
+        ),
+        !report && getClaudeKey() && !loadingReport && React.createElement('div', {style: {fontSize: '11px', color: T.muted, fontFamily: "'Inter',sans-serif", lineHeight: 1.6}},
+          'Generate an AI-powered scout report based on this season\'s stats and performance metrics — covering strengths, development areas, and a proposition pitch for target clubs.'
+        ),
+        loadingReport && React.createElement('div', {style: {textAlign: 'center', padding: '18px', color: T.muted, fontFamily: "'Inter',sans-serif", fontSize: '11px', letterSpacing: '0.08em'}},
+          'Claude is analysing the data…'
+        ),
+        report && React.createElement('div', {style: {display: 'flex', flexDirection: 'column', gap: '8px'}},
+          [
+            {key: 'strengths', icon: '↑', label: 'STRENGTHS', col: T.green, bg: T.greenDim, border: T.greenBorder},
+            {key: 'development', icon: '↗', label: 'DEVELOPMENT AREAS', col: T.amber, bg: T.amberDim, border: T.amberBorder},
+            {key: 'pitch', icon: '✦', label: 'PROPOSITION PITCH', col: '#18b8a0', bg: 'rgba(24,184,160,0.07)', border: 'rgba(24,184,160,0.3)'}
+          ].map(function(item) {
+            return report[item.key] && React.createElement('div', {key: item.key, style: {background: item.bg, border: `1px solid ${item.border}`, borderRadius: '3px', padding: '12px 14px'}},
+              React.createElement('div', {style: {display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '7px'}},
+                React.createElement('span', {style: {color: item.col, fontSize: '12px'}}, item.icon),
+                React.createElement('span', {style: {fontFamily: "'Inter',sans-serif", fontSize: '8px', letterSpacing: '0.12em', color: item.col}}, item.label)
+              ),
+              React.createElement('p', {style: {margin: 0, fontSize: '11px', color: T.text, lineHeight: 1.7, fontFamily: "'Inter',sans-serif"}}, report[item.key])
+            );
+          })
+        )
+      )
+    )
+  );
+}
 function PlayerDetail({
   player,
   clubs,
@@ -11393,6 +11843,7 @@ function PlayerDetail({
   const [propStatus, setPropStatus] = useState("Proposed");
   const [showShare, setShowShare] = useState(false);
   const [archiveDone, setArchiveDone] = useState(false);
+  const [activeTab, setActiveTab] = useState("info");
   const playerProps = proposals.filter(pr => pr.playerId === player.id).sort((a, b) => b.date > a.date ? 1 : -1);
   const vc = {
     SIGN: {
@@ -11600,7 +12051,13 @@ function PlayerDetail({
     }
   }, player.recommendation.verdict)), /*#__PURE__*/React.createElement(Mono, {
     size: "9px"
-  }, "Priority: ", player.recommendation.priority)))), /*#__PURE__*/React.createElement("div", {
+  }, "Priority: ", player.recommendation.priority)))),
+  React.createElement("div", {style:{display:"flex",gap:"0",marginBottom:"2px",borderBottom:`1px solid ${T.border}`}},
+    React.createElement("button", {onClick:()=>setActiveTab("info"), style:{background:"none",border:"none",borderBottom:activeTab==="info"?`2px solid ${T.gold}`:"2px solid transparent",padding:"10px 18px",color:activeTab==="info"?T.text:T.muted,fontFamily:"'Inter',sans-serif",fontSize:"9px",letterSpacing:"0.1em",cursor:"pointer",fontWeight:activeTab==="info"?600:400,transition:"all 0.15s"}}, "INFO"),
+    player.status==="Signed" && React.createElement("button", {onClick:()=>setActiveTab("performance"), style:{background:"none",border:"none",borderBottom:activeTab==="performance"?`2px solid ${T.gold}`:"2px solid transparent",padding:"10px 18px",color:activeTab==="performance"?T.text:T.muted,fontFamily:"'Inter',sans-serif",fontSize:"9px",letterSpacing:"0.1em",cursor:"pointer",fontWeight:activeTab==="performance"?600:400,transition:"all 0.15s"}}, "PERFORMANCE")
+  ),
+  activeTab==="performance" && player.status==="Signed" && React.createElement(PerformanceTab, {player}),
+  activeTab!=="performance" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(5,1fr)",
@@ -11985,7 +12442,7 @@ function PlayerDetail({
   }, /*#__PURE__*/React.createElement(Mono, {
     size: "9px",
     color: T.dim
-  }, "Added ", player.dateAdded, " by ", player.addedBy || "—", " · ID: ", player.id)));
+  }, "Added ", player.dateAdded, " by ", player.addedBy || "—", " · ID: ", player.id))));
 }
 
 // Player Form
