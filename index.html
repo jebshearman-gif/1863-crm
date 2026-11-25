@@ -18042,6 +18042,17 @@ Format:
       if (!Array.isArray(arr)) throw new Error("Unexpected response format");
       setReport(arr);
       buildEmail(arr);
+      // ── Save to 6-week rolling cache ──────────────────────────────────────
+      try {
+        const CACHE_KEY = "1863_weekly_cache";
+        const existing = JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
+        const snapshot = { week: weekStr(), date: Date.now(), players: arr };
+        // Remove any entry for the same week, then prepend latest
+        const pruned = existing.filter(e => e.week !== snapshot.week);
+        pruned.unshift(snapshot);
+        // Keep last 6 weeks only
+        localStorage.setItem(CACHE_KEY, JSON.stringify(pruned.slice(0, 6)));
+      } catch(_) {}
     } catch (e) {
       setError(e.message || "Failed to generate report");
     }
@@ -19358,6 +19369,23 @@ function SocialView({ players }) {
   const selPlayer = signedPlayers.find(p => String(p.id) === String(selId));
   const selType = POST_TYPES.find(t => t.id === postType) || POST_TYPES[0];
 
+  // ── Pull cached weekly report data for the selected player ───────────────
+  function getPlayerCache(playerName) {
+    if (!playerName) return [];
+    try {
+      const cache = JSON.parse(localStorage.getItem("1863_weekly_cache") || "[]");
+      return cache.map(snapshot => {
+        const entry = (snapshot.players || []).find(p =>
+          p.name && playerName && p.name.toLowerCase().trim() === playerName.toLowerCase().trim()
+        );
+        return entry ? { week: snapshot.week, date: snapshot.date, ...entry } : null;
+      }).filter(Boolean);
+    } catch(_) { return []; }
+  }
+
+  const playerCache = React.useMemo(() => getPlayerCache(selPlayer?.name), [selPlayer?.name, selId]);
+  const latestReport = playerCache[0] || null;
+
   async function generate() {
     if (!selPlayer) return;
     if (!getClaudeKey()) { setErr("Claude API key required — configure in AI Settings."); return; }
@@ -19381,6 +19409,16 @@ function SocialView({ players }) {
 
     const systemPrompt = `You are a creative social media manager for 1863, a premium football agency. Your job is to create compelling Instagram content that builds both the agency's prestige brand and its players' personal profiles. The agency name is 1863 (pronounced "Eighteen Sixty-Three"). Write in a ${toneMap[tone]} tone.`;
 
+    // Build performance context from cached weekly reports
+    const cacheLines = playerCache.slice(0, 6).map(r => {
+      const stats = [];
+      if (r.goals) stats.push(`${r.goals} goal${r.goals>1?"s":""}`);
+      if (r.assists) stats.push(`${r.assists} assist${r.assists>1?"s":""}`);
+      if (r.minutesPlayed) stats.push(`${r.minutesPlayed} mins`);
+      if (r.rating) stats.push(`rated ${r.rating}`);
+      return `• ${r.week}: ${r.matchResult || "played"} — ${stats.join(", ") || "no standout stats"}${r.news ? ` | News: ${r.news}` : ""}`;
+    }).join("\n");
+
     const userPrompt = `Generate exactly 3 distinct Instagram post ideas for the following player.
 
 Post type: ${selType.label} — ${selType.hint}
@@ -19388,6 +19426,7 @@ ${extraCtx ? `Additional context: ${extraCtx}` : ""}
 
 Player info:
 ${playerInfo}
+${cacheLines ? `\nRecent performance data (last ${playerCache.length} week${playerCache.length>1?"s":""} from agency reports):\n${cacheLines}\n\nWhere relevant, ground the posts in this real recent data — specific results, goals, ratings or news make the content more authentic.` : ""}
 
 For each post idea return a JSON object with:
 - "caption": the full Instagram caption (1–4 sentences, includes emojis naturally)
@@ -19523,6 +19562,26 @@ Return ONLY a valid JSON array of 3 objects, nothing else. Example structure:
                   fontFamily:"'DM Sans',sans-serif",fontSize:"12px",marginTop:"6px",
                   outline:"none"}
         })
+      ),
+
+      // Cache indicator
+      latestReport && React.createElement("div", {
+        style:{background:"rgba(245,140,48,0.06)",border:`1px solid rgba(245,140,48,0.2)`,
+               borderRadius:"4px",padding:"10px 12px"}
+      },
+        React.createElement("div", {style:{display:"flex",alignItems:"center",gap:"6px",marginBottom:"6px"}},
+          React.createElement("span", {style:{fontSize:"10px",color:T.gold}}, "⚡"),
+          React.createElement(Label, {size:"9px", color:T.gold}, "WEEKLY REPORT DATA LOADED"),
+        ),
+        React.createElement("div", {style:{fontFamily:"'DM Sans',sans-serif",fontSize:"11px",color:T.muted,lineHeight:1.5}},
+          `${playerCache.length} week${playerCache.length>1?"s":""} cached · Latest: ${latestReport.week}`
+        ),
+        latestReport.matchResult && React.createElement("div", {
+          style:{fontFamily:"'Space Mono',monospace",fontSize:"10px",color:T.text,marginTop:"4px"}
+        }, latestReport.matchResult + (latestReport.rating ? `  ·  ${latestReport.rating}` : "")),
+        latestReport.flagged && React.createElement("div", {
+          style:{marginTop:"4px",fontSize:"10px",color:"#e05050",fontFamily:"'DM Sans',sans-serif"}
+        }, "⚠ Flagged item — posts will reference this")
       ),
 
       // Generate button
