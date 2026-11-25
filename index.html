@@ -6,7 +6,7 @@
 <title>1863 Sports & Entertainment</title>
 <link rel='preconnect' href='https://fonts.googleapis.com'/>
 <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin/>
-<link href='https://fonts.googleapis.com/css2?family=Barlow:wght@700;900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap' rel='stylesheet'/>
+<link href='https://fonts.googleapis.com/css2?family=Barlow:wght@700;900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=DM+Serif+Display&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap' rel='stylesheet'/>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js'></script>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js'></script>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js'></script>
@@ -8782,7 +8782,7 @@ function Logo1863({size=40, dark=false}) {
     React.createElement("div", {
       style: {
         fontFamily:"'Barlow',sans-serif", fontWeight:700,
-        fontSize: Math.round(size * 0.32) + "px",
+        fontSize: Math.round(size * 0.20) + "px",
         letterSpacing:"0.22em", textTransform:"uppercase",
         color: dark ? "#6d6e71" : T.text,
         marginBottom: Math.round(size * 0.07) + "px", lineHeight:1
@@ -8817,7 +8817,7 @@ function Logo1863Compact() {
   );
 }
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@900&family=Barlow+Condensed:wght@300&family=DM+Sans:wght@300;400;500&family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;}
   ::placeholder{color:#2a3f52;}
   input,select,textarea{font-family:'DM Sans',sans-serif;}
@@ -11482,7 +11482,7 @@ function PerformanceTab({player}) {
     if (!k) return;
     setLoadingStats(true); setErr(null);
     try {
-      const r = await fetch(`https://v3.football.api-sports.io/players?id=${id}&season=2024`, {headers: {'x-apisports-key': k}});
+      const r = await fetch(`/api/football/players?id=${id}&season=2024`, {headers: {'x-af-key': k}});
       const d = await r.json();
       const resp = d.response && d.response[0];
       if (resp) {
@@ -11491,7 +11491,7 @@ function PerformanceTab({player}) {
         const rows = [];
         for (const s of seasons) {
           try {
-            const cr = await fetch(`https://v3.football.api-sports.io/players?id=${id}&season=${s}`, {headers: {'x-apisports-key': k}});
+            const cr = await fetch(`/api/football/players?id=${id}&season=${s}`, {headers: {'x-af-key': k}});
             const cd = await cr.json();
             const cr2 = cd.response && cd.response[0];
             if (cr2 && cr2.statistics) cr2.statistics.forEach(st => {
@@ -11522,7 +11522,7 @@ function PerformanceTab({player}) {
     const name = club.replace(/\b(fc|sc|rc|rfc|afc|fk|sk|bv|sv|vfb|vfl|sg|cd|ud|ac|as|ss|cf|us)\b/gi, '').replace(/[^a-zA-Z0-9]/g, '');
     if (!name) return;
     try {
-      const r = await fetch(`https://api.clubelo.com/${name}`);
+      const r = await fetch(`/api/elo/${name}`);
       const txt = await r.text();
       const lines = txt.trim().split('\n');
       if (lines.length > 1) {
@@ -11539,7 +11539,7 @@ function PerformanceTab({player}) {
     if (!k) { setErr('API-Football key not set. Go to AI Settings to add it.'); return; }
     setSearching(true); setErr(null);
     try {
-      const r = await fetch(`https://v3.football.api-sports.io/players?search=${encodeURIComponent(q)}&season=2024`, {headers: {'x-apisports-key': k}});
+      const r = await fetch(`/api/football/players?search=${encodeURIComponent(q)}&season=2024`, {headers: {'x-af-key': k}});
       const d = await r.json();
       setResults(d.response || []);
       if (!(d.response && d.response.length)) setErr('No players found. Try a shorter name.');
